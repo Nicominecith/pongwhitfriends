@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pong Ultra</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { margin:0; background:#020617; color:#fff; font-family:'Segoe UI',sans-serif; overflow:hidden; }
+    canvas { display:block; background:radial-gradient(circle,#1e293b,#020617); border:1px solid #334155; }
+    .hidden { display:none !important; }
+    input { background:#1e293b; border:1px solid #334155; border-radius:8px; padding:10px 14px; color:#fff; width:100%; box-sizing:border-box; }
+    input:focus { outline:none; border-color:#38bdf8; }
+  </style>
+</head>
+<body>
+
+<!-- AUTH SCREEN -->
+<div id="auth-screen" class="fixed inset-0 flex items-center justify-center p-4">
+  <div class="bg-slate-900 border border-slate-700 rounded-3xl p-8 w-full max-w-sm">
+    <h1 class="text-4xl font-black text-sky-400 italic text-center mb-1">PONG ULTRA</h1>
+    <p class="text-slate-500 text-xs text-center mb-8 uppercase tracking-widest">Online Edition</p>
+
+    <div id="auth-error" class="hidden bg-red-900/50 border border-red-500 text-red-300 text-sm p-3 rounded-xl mb-4"></div>
+
+    <div id="login-form">
+      <input id="login-email" type="email" placeholder="E-Mail" class="mb-3" />
+      <input id="login-password" type="password" placeholder="Passwort" class="mb-4" />
+      <button onclick="login()" class="w-full bg-sky-600 hover:bg-sky-500 py-3 rounded-xl font-bold transition">Einloggen</button>
+      <p class="text-center text-slate-500 text-sm mt-4">Noch kein Account? <a href="#" onclick="showReg()" class="text-sky-400 hover:underline">Registrieren</a></p>
+    </div>
+
+    <div id="reg-form" class="hidden">
+      <input id="reg-user" type="text" placeholder="Benutzername" class="mb-3" />
+      <input id="reg-email" type="email" placeholder="E-Mail" class="mb-3" />
+      <input id="reg-pass" type="password" placeholder="Passwort (min. 6 Zeichen)" class="mb-4" />
+      <button onclick="register()" class="w-full bg-purple-600 hover:bg-purple-500 py-3 rounded-xl font-bold transition">Account erstellen</button>
+      <p class="text-center text-slate-500 text-sm mt-4"><a href="#" onclick="showLogin()" class="text-sky-400 hover:underline">Zurück zum Login</a></p>
+    </div>
+  </div>
+</div>
+
+<!-- HAUPTMENÜ -->
+<div id="menu" class="hidden fixed inset-0 flex flex-col items-center justify-center p-6 text-center">
+  <h1 class="text-5xl font-black italic text-sky-400 mb-1">PONG ULTRA</h1>
+  <div id="rank-badge" class="text-sm bg-slate-800 px-4 py-1 rounded-full border border-slate-600 mb-2"></div>
+  <div class="text-slate-500 text-xs mb-8">
+    ELO: <span id="menu-elo">-</span> &nbsp;|&nbsp; W: <span id="menu-wins">-</span> / L: <span id="menu-losses">-</span> &nbsp;|&nbsp; 💰 <span id="menu-coins">-</span>
+  </div>
+
+  <div class="flex gap-4 mb-6">
+    <button onclick="joinQueue(true)" class="bg-sky-600 hover:bg-sky-500 px-8 py-4 rounded-2xl font-bold text-xl transition active:scale-95">
+      🏆 RANKED
+    </button>
+    <button onclick="joinQueue(false)" class="bg-slate-700 hover:bg-slate-600 px-8 py-4 rounded-2xl font-bold text-xl transition active:scale-95">
+      🎮 UNRANKED
+    </button>
+  </div>
+
+  <div class="flex gap-3 mb-6">
+    <button onclick="showShopUI()" class="bg-amber-500 px-5 py-2 rounded-xl text-slate-900 font-bold">🛒 Shop</button>
+    <button onclick="showLeaderboard()" class="bg-emerald-600 px-5 py-2 rounded-xl font-bold">🏅 Rangliste</button>
+    <button onclick="logout()" class="bg-slate-700 px-5 py-2 rounded-xl font-bold text-slate-400">Logout</button>
+  </div>
+</div>
+
+<!-- QUEUE SCREEN -->
+<div id="queue-screen" class="hidden fixed inset-0 flex flex-col items-center justify-center text-center">
+  <div class="text-5xl mb-4 animate-spin">⚙️</div>
+  <h2 class="text-2xl font-bold mb-2">Suche Gegner...</h2>
+  <p id="queue-type" class="text-slate-400 mb-6"></p>
+  <button onclick="leaveQueue()" class="bg-slate-700 px-6 py-2 rounded-xl text-slate-400 hover:text-red-400">Abbrechen</button>
+</div>
+
+<!-- SPIELFELD -->
+<div id="game-screen" class="hidden fixed inset-0 flex flex-col items-center justify-center">
+  <div class="flex justify-between w-full max-w-3xl px-4 mb-2 items-center">
+    <div class="text-sky-400 font-mono text-lg">Du: <span id="score-me">0</span></div>
+    <div id="opponent-info" class="text-slate-400 text-sm"></div>
+    <div class="text-purple-400 font-mono text-lg"><span id="score-opp">0</span> :Gegner</div>
+  </div>
+  <canvas id="gameCanvas"></canvas>
+  <div id="touch-hint" class="text-slate-600 text-xs mt-2">Ziehe auf dem Bildschirm um dein Paddle zu steuern</div>
+</div>
+
+<!-- RESULT SCREEN -->
+<div id="result-screen" class="hidden fixed inset-0 flex flex-col items-center justify-center text-center p-6">
+  <div id="result-emoji" class="text-7xl mb-4"></div>
+  <h2 id="result-title" class="text-4xl font-black mb-2"></h2>
+  <div id="result-elo" class="text-xl mb-2"></div>
+  <div id="result-score" class="text-slate-400 mb-8"></div>
+  <button onclick="backToMenu()" class="bg-sky-600 px-10 py-3 rounded-2xl font-bold text-xl">Zurück zum Menü</button>
+</div>
+
+<!-- MODAL (Shop / Rangliste) -->
+<div id="modal" class="hidden fixed inset-0 bg-black/95 z-50 flex items-center justify-center p-4">
+  <div class="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-xl max-h-[85vh] flex flex-col">
+    <div class="p-5 border-b border-slate-700 flex justify-between items-center">
+      <h2 id="modal-title" class="text-xl font-bold text-sky-400"></h2>
+      <button onclick="closeModal()" class="text-3xl hover:text-red-500">✕</button>
+    </div>
+    <div id="modal-body" class="p-5 overflow-y-auto"></div>
+  </div>
+</div>
+
+<script>
+const API = 'https://YOUR_BACKEND_URL'; // ← Render.com URL eintragen
+const WS_URL = API.replace('https','wss').replace('http','ws');
+
+let token = localStorage.getItem('pu_token');
+let me = null;
+let ws = null;
+let mySide = null;
+let canvas, ctx;
+let gameState = {};
+
+// ── SKIN FARBEN ──────────────────────────────────────
+const SKIN_COLORS = {
+  default: '#ffffff', plasma: '#38bdf8', toxin: '#4ade80',
+  ruby: '#f87171', gold: '#fbbf24', void: '#a855f7', rgb: 'rainbow',
+  wall_neon: '#00ffff', wall_lava: '#ff4400', wall_space: '#1a0033'
+};
+
+// ── AUTH ──────────────────────────────────────────────
+function showReg() {
+  document.getElementById('login-form').classList.add('hidden');
+  document.getElementById('reg-form').classList.remove('hidden');
+  clearErr();
+}
+function showLogin() {
+  document.getElementById('reg-form').classList.add('hidden');
+  document.getElementById('login-form').classList.remove('hidden');
+  clearErr();
+}
+function clearErr() { document.getElementById('auth-error').classList.add('hidden'); }
+function showErr(msg) {
+  const el = document.getElementById('auth-error');
+  el.innerText = msg;
+  el.classList.remove('hidden');
+}
+
+async function login() {
+  const email = document.getElementById('login-email').value;
+  const password = document.getElementById('login-password').value;
+  const res = await fetch(`${API}/auth/login`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ email, password })
+  });
+  const data = await res.json();
+  if (!res.ok) return showErr(data.error);
+  token = data.token;
+  me = data.user;
+  localStorage.setItem('pu_token', token);
+  enterMenu();
+}
+
+async function register() {
+  const username = document.getElementById('reg-user').value;
+  const email = document.getElementById('reg-email').value;
+  const password = document.getElementById('reg-pass').value;
+  if (password.length < 6) return showErr('Passwort mindestens 6 Zeichen.');
+  const res = await fetch(`${API}/auth/register`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ username, email, password })
+  });
+  const data = await res.json();
+  if (!res.ok) return showErr(data.error);
+  token = data.token;
+  me = data.user;
+  localStorage.setItem('pu_token', token);
+  enterMenu();
+}
+
+async function refreshMe() {
+  const res = await fetch(`${API}/me`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) { logout(); return; }
+  me = await res.json();
+}
+
+function logout() {
+  localStorage.removeItem('pu_token');
+  location.reload();
+}
+
+// ── MENÜ ──────────────────────────────────────────────
+function show(id) {
+  ['auth-screen','menu','queue-screen','game-screen','result-screen']
+    .forEach(s => document.getElementById(s).classList.add('hidden'));
+  document.getElementById(id).classList.remove('hidden');
+}
+
+function enterMenu() {
+  show('menu');
+  document.getElementById('menu-elo').innerText = me.elo;
+  document.getElementById('menu-wins').innerText = me.wins;
+  document.getElementById('menu-losses').innerText = me.losses;
+  document.getElementById('menu-coins').innerText = me.coins;
+  document.getElementById('rank-badge').innerText = me.rank || 'Iron I';
+}
+
+// ── MATCHMAKING ───────────────────────────────────────
+function joinQueue(ranked) {
+  show('queue-screen');
+  document.getElementById('queue-type').innerText = ranked ? '🏆 Ranked Match' : '🎮 Unranked Match';
+  connectWS(() => {
+    ws.send(JSON.stringify({ type: 'join_queue', ranked }));
+  });
+}
+
+function leaveQueue() {
+  if (ws) ws.send(JSON.stringify({ type: 'leave_queue' }));
+  enterMenu();
+}
+
+function backToMenu() {
+  refreshMe().then(() => enterMenu());
+}
+
+// ── WEBSOCKET ─────────────────────────────────────────
+function connectWS(onReady) {
+  if (ws && ws.readyState === WebSocket.OPEN) { onReady(); return; }
+  ws = new WebSocket(WS_URL);
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: 'auth', token }));
+  };
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'auth_ok') { me = { ...me, ...msg.user }; onReady(); }
+    if (msg.type === 'in_queue') { /* already showing queue screen */ }
+    if (msg.type === 'game_start') startGame(msg);
+    if (msg.type === 'state') updateGameState(msg);
+    if (msg.type === 'game_end') showResult(msg);
+  };
+
+  ws.onclose = () => {
+    if (document.getElementById('game-screen') && !document.getElementById('game-screen').classList.contains('hidden')) {
+      showResult({ won: false, eloChange: 0, score1: 0, score2: 0 });
+    }
+  };
+}
+
+// ── SPIEL ─────────────────────────────────────────────
+let myPaddleY = 0;
+let sendInterval = null;
+
+function startGame(msg) {
+  mySide = msg.side;
+  show('game-screen');
+
+  canvas = document.getElementById('gameCanvas');
+  ctx = canvas.getContext('2d');
+  canvas.width = msg.width;
+  canvas.height = msg.height;
+  canvas.style.maxWidth = '95vw';
+  canvas.style.maxHeight = '75vh';
+  myPaddleY = canvas.height / 2 - 45;
+
+  document.getElementById('opponent-info').innerText = `vs ${msg.opponent} ${msg.ranked ? '(Ranked)' : ''}`;
+  document.getElementById('score-me').innerText = 0;
+  document.getElementById('score-opp').innerText = 0;
+
+  // Touch-Steuerung
+  canvas.ontouchmove = canvas.ontouchstart = (e) => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const scaleY = canvas.height / rect.height;
+    const t = e.touches[0];
+    myPaddleY = (t.clientY - rect.top) * scaleY - 45;
+    myPaddleY = Math.max(0, Math.min(myPaddleY, canvas.height - 90));
+  };
+  canvas.style.touchAction = 'none';
+
+  // Maus-Steuerung
+  canvas.onmousemove = (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleY = canvas.height / rect.height;
+    myPaddleY = (e.clientY - rect.top) * scaleY - 45;
+    myPaddleY = Math.max(0, Math.min(myPaddleY, canvas.height - 90));
+  };
+
+  // Keyboard
+  document.onkeydown = (e) => {
+    if (e.key === 'ArrowUp' || e.key === 'w') myPaddleY = Math.max(0, myPaddleY - 20);
+    if (e.key === 'ArrowDown' || e.key === 's') myPaddleY = Math.min(canvas.height - 90, myPaddleY + 20);
+  };
+
+  // Sende Paddle-Position 60x/Sek
+  clearInterval(sendInterval);
+  sendInterval = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'paddle_move', y: myPaddleY }));
+    }
+  }, 16);
+
+  requestAnimationFrame(renderLoop);
+}
+
+function updateGameState(msg) {
+  const myScore = mySide === 'p1' ? msg.score1 : msg.score2;
+  const oppScore = mySide === 'p1' ? msg.score2 : msg.score1;
+  document.getElementById('score-me').innerText = myScore;
+  document.getElementById('score-opp').innerText = oppScore;
+  gameState = msg;
+}
+
+function renderLoop() {
+  if (!gameState.ball || document.getElementById('game-screen').classList.contains('hidden')) return;
+
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  // Mittellinie
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.setLineDash([10, 10]);
+  ctx.beginPath(); ctx.moveTo(W/2, 0); ctx.lineTo(W/2, H); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Paddle: Ich
+  const myY = mySide === 'p1' ? myPaddleY : gameState.p2y;
+  const oppY = mySide === 'p1' ? gameState.p2y : myPaddleY;
+  const myX = mySide === 'p1' ? 32 : W - 44;
+  const oppX = mySide === 'p1' ? W - 44 : 32;
+
+  // Ballfarbe (Skin)
+  const activeSkin = (me.skins && me.skins[0]) ? me.skins[me.skins.length - 1] : 'default';
+  const ballColor = SKIN_COLORS[activeSkin] === 'rainbow'
+    ? `hsl(${Date.now()/5 % 360}, 80%, 60%)`
+    : (SKIN_COLORS[activeSkin] || '#fff');
+
+  ctx.fillStyle = '#38bdf8';
+  ctx.shadowBlur = 15; ctx.shadowColor = '#38bdf8';
+  ctx.fillRect(myX, myY, 12, 90);
+
+  ctx.fillStyle = '#a855f7';
+  ctx.shadowColor = '#a855f7';
+  ctx.fillRect(oppX, oppY, 12, 90);
+
+  // Ball
+  ctx.fillStyle = ballColor;
+  ctx.shadowColor = ballColor;
+  ctx.beginPath();
+  ctx.arc(gameState.ball.x, gameState.ball.y, 8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  requestAnimationFrame(renderLoop);
+}
+
+// ── RESULT ────────────────────────────────────────────
+function showResult(msg) {
+  clearInterval(sendInterval);
+  show('result-screen');
+  document.getElementById('result-emoji').innerText = msg.won ? '🏆' : '💀';
+  document.getElementById('result-title').innerText = msg.won ? 'GEWONNEN!' : 'VERLOREN';
+  document.getElementById('result-title').style.color = msg.won ? '#38bdf8' : '#f87171';
+  document.getElementById('result-score').innerText = `${msg.score1} : ${msg.score2}`;
+  const change = msg.eloChange || 0;
+  document.getElementById('result-elo').innerText = msg.won
+    ? `+${change} ELO 🔥` : `${change > 0 ? '-' : ''}${change} ELO`;
+  document.getElementById('result-elo').style.color = msg.won ? '#4ade80' : '#f87171';
+}
+
+// ── SHOP ──────────────────────────────────────────────
+async function showShopUI() {
+  const res = await fetch(`${API}/shop`, { headers: { Authorization: `Bearer ${token}` } });
+  const items = await res.json();
+  document.getElementById('modal-title').innerText = '🛒 Shop';
+  document.getElementById('modal-body').innerHTML = items.map(item => `
+    <div style="display:flex;justify-content:space-between;align-items:center;background:#1e293b;border-radius:12px;padding:14px;margin-bottom:10px;border:1px solid #334155;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div style="width:36px;height:36px;border-radius:50%;background:${SKIN_COLORS[item.id] === 'rainbow' ? 'linear-gradient(45deg,red,yellow,lime,blue)' : SKIN_COLORS[item.id] || '#fff'}"></div>
+        <div>
+          <div style="font-weight:600">${item.name}</div>
+          <div style="font-size:12px;color:#64748b">${item.type === 'wall' ? 'Wand-Skin' : 'Ball-Skin'}</div>
+        </div>
+      </div>
+      ${item.owned
+        ? `<span style="color:#4ade80;font-size:12px">✓ Besessen</span>`
+        : `<button onclick="buySkin('${item.id}')" style="background:#f59e0b;color:#000;border:none;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer;">${item.price} 🪙</button>`
+      }
+    </div>
+  `).join('');
+  document.getElementById('modal').classList.remove('hidden');
+}
+
+async function buySkin(id) {
+  const res = await fetch(`${API}/shop/buy`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ skin_id: id })
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error);
+  me.coins = data.coins;
+  document.getElementById('menu-coins').innerText = me.coins;
+  showShopUI();
+}
+
+// ── LEADERBOARD ───────────────────────────────────────
+async function showLeaderboard() {
+  const res = await fetch(`${API}/leaderboard`);
+  const list = await res.json();
+  document.getElementById('modal-title').innerText = '🏅 Rangliste';
+  document.getElementById('modal-body').innerHTML = list.map((u, i) => `
+    <div style="display:flex;justify-content:space-between;align-items:center;background:#1e293b;border-radius:10px;padding:12px 16px;margin-bottom:8px;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:18px;font-weight:900;color:#475569;min-width:28px">#${i+1}</span>
+        <div>
+          <div style="font-weight:600">${u.username}</div>
+          <div style="font-size:12px;color:#64748b">${u.rank}</div>
+        </div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-weight:700;color:#38bdf8">${u.elo} ELO</div>
+        <div style="font-size:12px;color:#64748b">${u.wins} Wins</div>
+      </div>
+    </div>
+  `).join('');
+  document.getElementById('modal').classList.remove('hidden');
+}
+
+function closeModal() { document.getElementById('modal').classList.add('hidden'); }
+
+// ── INIT ──────────────────────────────────────────────
+async function init() {
+  if (!token) { show('auth-screen'); return; }
+  const res = await fetch(`${API}/me`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) { show('auth-screen'); return; }
+  me = await res.json();
+  enterMenu();
+}
+
+init();
+</script>
+</body>
+</html>
