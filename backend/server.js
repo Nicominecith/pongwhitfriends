@@ -14,41 +14,43 @@ const wss = new WebSocket.Server({ server });
 app.use(cors());
 app.use(express.json());
 
-// Deine Supabase Konfiguration
-// Wir stellen sicher, dass die Werte nicht undefined sind, bevor wir den Client erstellen
+// ── KONFIGURATION ───────────────────────────────────────
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://leumrsdjjgvgepoevwsf.supabase.co";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "sb_secret_FUUT4OMj9dPh8ORwPJBw6A_hnIZG3Kn";
+const JWT_SECRET = process.env.JWT_SECRET || 'pong-ultra-secret';
 
-if (!SUPABASE_URL || SUPABASE_URL === "") {
+if (!SUPABASE_URL) {
   console.error("KRITISCHER FEHLER: SUPABASE_URL ist nicht definiert!");
   process.exit(1);
 }
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-const JWT_SECRET = process.env.JWT_SECRET || 'pong-ultra-secret';
 
-// ── RANKS ──────────────────────────────────────────────
+// ── MIDDLEWARE ──────────────────────────────────────────
+const auth = (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'Nicht eingeloggt.' });
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    req.user = payload; // enthält die id
+    next();
+  } catch {
+    res.status(401).json({ error: 'Token ungültig.' });
+  }
+};
+
+// ── RANKS & ELO ─────────────────────────────────────────
 const RANKS = [
-  { name: 'Iron I',       min: 0    },
-  { name: 'Iron II',      min: 100  },
-  { name: 'Bronze I',      min: 200  },
-  { name: 'Bronze II',     min: 300  },
-  { name: 'Silver I',      min: 400  },
-  { name: 'Silver II',     min: 500  },
-  { name: 'Gold I',        min: 600  },
-  { name: 'Gold II',       min: 700  },
-  { name: 'Platinum I',    min: 800  },
-  { name: 'Platinum II',   min: 900  },
-  { name: 'Diamond I',     min: 1000 },
-  { name: 'Diamond II',    min: 1100 },
-  { name: 'Master I',      min: 1200 },
-  { name: 'Master II',     min: 1350 },
-  { name: 'Grandmaster I', min: 1500 },
-  { name: 'Grandmaster II', min: 1650 },
-  { name: 'Challenger I',  min: 1800 },
-  { name: 'Challenger II', min: 1950 },
-  { name: 'Challenger III', min: 2100 },
-  { name: 'Apex',          min: 2300 }
+  { name: 'Iron I', min: 0 }, { name: 'Iron II', min: 100 },
+  { name: 'Bronze I', min: 200 }, { name: 'Bronze II', min: 300 },
+  { name: 'Silver I', min: 400 }, { name: 'Silver II', min: 500 },
+  { name: 'Gold I', min: 600 }, { name: 'Gold II', min: 700 },
+  { name: 'Platinum I', min: 800 }, { name: 'Platinum II', min: 900 },
+  { name: 'Diamond I', min: 1000 }, { name: 'Diamond II', min: 1100 },
+  { name: 'Master I', min: 1200 }, { name: 'Master II', min: 1350 },
+  { name: 'Grandmaster I', min: 1500 }, { name: 'Grandmaster II', min: 1650 },
+  { name: 'Challenger I', min: 1800 }, { name: 'Challenger II', min: 1950 },
+  { name: 'Challenger III', min: 2100 }, { name: 'Apex', min: 2300 }
 ];
 
 function getRank(elo) {
@@ -56,12 +58,6 @@ function getRank(elo) {
     if (elo >= RANKS[i].min) return RANKS[i].name;
   }
   return RANKS[0].name;
-}
-
-function calcElo(winnerElo, loserElo) {
-  const K = 32;
-  const expected = 1 / (1 + Math.pow(10, (loserElo - winnerElo) / 400));
-  return Math.round(K * (1 - expected));
 }
 
 // ── AUTH ROUTES ────────────────────────────────────────
@@ -98,17 +94,53 @@ app.post('/auth/login', async (req, res) => {
   res.json({ token, user: { ...safe, rank: getRank(user.elo) } });
 });
 
-app.get('/me', async (req, res) => {
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'Nicht eingeloggt.' });
+app.get('/me', auth, async (req, res) => {
+  const { data: user } = await supabase
+    .from('users')
+    .select('id, username, email, elo, coins, wins, losses')
+    .eq('id', req.user.id).single();
+
+  if (!user) return res.status(404).json({ error: 'Nutzer nicht gefunden.' });
+
+  const { data: skins } = await supabase
+    .from('user_skins').select('skin_id').eq('user_id', req.user.id);
+
+  res.json({
+    ...user,
+    rank: getRank(user.elo),
+    skins: skins ? skins.map(s => s.skin_id) : []
+  });
+});
+
+// ── ACCOUNT MANAGEMENT ─────────────────────────────────
+app.post('/account/rename', auth, async (req, res) => {
+  const { username } = req.body;
+  if (!username || username.length < 3 || username.length > 20)
+    return res.status(400).json({ error: 'Benutzername muss 3–20 Zeichen lang sein.' });
+
+  const { data: existing } = await supabase
+    .from('users').select('id').eq('username', username).single();
+  
+  if (existing) return res.status(400).json({ error: 'Dieser Name ist bereits vergeben.' });
+
+  const { error } = await supabase
+    .from('users').update({ username }).eq('id', req.user.id);
+    
+  if (error) return res.status(500).json({ error: 'Fehler beim Speichern.' });
+
+  res.json({ success: true, username });
+});
+
+app.delete('/account', auth, async (req, res) => {
   try {
-    const payload = jwt.verify(token, JWT_SECRET);
-    const { data: user } = await supabase
-      .from('users').select('id, username, elo, coins, wins, losses').eq('id', payload.id).single();
-    const { data: skins } = await supabase
-      .from('user_skins').select('skin_id').eq('user_id', payload.id);
-    res.json({ ...user, rank: getRank(user.elo), skins: skins.map(s => s.skin_id) });
-  } catch { res.status(401).json({ error: 'Token ungültig.' }); }
+    await supabase.from('user_skins').delete().eq('user_id', req.user.id);
+    await supabase.from('matches').update({ player1_id: null }).eq('player1_id', req.user.id);
+    await supabase.from('matches').update({ player2_id: null }).eq('player2_id', req.user.id);
+    await supabase.from('users').delete().eq('id', req.user.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Löschen fehlgeschlagen.' });
+  }
 });
 
 app.get('/leaderboard', async (req, res) => {
@@ -117,9 +149,16 @@ app.get('/leaderboard', async (req, res) => {
   res.json(data.map(u => ({ ...u, rank: getRank(u.elo) })));
 });
 
-// ── WEBSOCKET MATCHMAKING ─────────────────────────────
+// ── WEBSOCKET LOGIK ────────────────────────────────────
 const queue = { ranked: [], unranked: [] };
 const games = new Map();
+
+function broadcastOnlineCount() {
+  let count = 0;
+  wss.clients.forEach(c => { if (c.userId && c.readyState === WebSocket.OPEN) count++; });
+  const msg = JSON.stringify({ type: 'online_count', count });
+  wss.clients.forEach(c => { if (c.readyState === WebSocket.OPEN) c.send(msg); });
+}
 
 wss.on('connection', (ws) => {
   ws.isAlive = true;
@@ -134,11 +173,16 @@ wss.on('connection', (ws) => {
         const payload = jwt.verify(msg.token, JWT_SECRET);
         const { data: user } = await supabase
           .from('users').select('id, username, elo').eq('id', payload.id).single();
+        
         ws.userId = user.id;
         ws.username = user.username;
         ws.elo = user.elo;
+        
         ws.send(JSON.stringify({ type: 'auth_ok', user: { ...user, rank: getRank(user.elo) } }));
-      } catch { ws.send(JSON.stringify({ type: 'auth_fail' })); }
+        broadcastOnlineCount(); 
+      } catch { 
+        ws.send(JSON.stringify({ type: 'auth_fail' })); 
+      }
     }
 
     if (msg.type === 'join_queue') {
@@ -151,10 +195,25 @@ wss.on('connection', (ws) => {
 
     if (msg.type === 'paddle_move') {
       const game = games.get(ws.gameId);
-      if (!game) return;
-      const side = game.p1.ws === ws ? 'p1' : 'p2';
-      game[side].y = msg.y;
+      if (game) {
+        const side = game.p1.ws === ws ? 'p1' : 'p2';
+        game[side].y = msg.y;
+      }
     }
+  });
+
+  ws.on('close', () => {
+    // Aus Queue entfernen
+    if (ws.queueType) {
+      queue[ws.queueType] = queue[ws.queueType].filter(p => p !== ws);
+    }
+    // Spiel beenden falls aktiv
+    const game = games.get(ws.gameId);
+    if (game) {
+      clearInterval(game.interval);
+      games.delete(ws.gameId);
+    }
+    setTimeout(broadcastOnlineCount, 100);
   });
 });
 
@@ -177,21 +236,22 @@ function createGame(p1ws, p2ws, ranked) {
   };
   p1ws.gameId = gameId; p2ws.gameId = gameId;
   games.set(gameId, game);
+  
   p1ws.send(JSON.stringify({ type: 'game_start', side: 'p1', opponent: p2ws.username, width: W, height: H }));
   p2ws.send(JSON.stringify({ type: 'game_start', side: 'p2', opponent: p1ws.username, width: W, height: H }));
+  
   game.interval = setInterval(() => tick(game, gameId), 16);
 }
 
 function tick(game, gameId) {
-  // Einfache Ball-Physik
   game.ball.x += game.ball.dx;
   game.ball.y += game.ball.dy;
+  
   if(game.ball.y < 0 || game.ball.y > game.height) game.ball.dy *= -1;
   
-  // Kollisionen und Punkte
   if(game.ball.x < 0 || game.ball.x > game.width) {
-      if(game.ball.x < 0) game.p2.score++; else game.p1.score++;
-      game.ball.x = game.width/2; game.ball.y = game.height/2;
+    if(game.ball.x < 0) game.p2.score++; else game.p1.score++;
+    game.ball.x = game.width/2; game.ball.y = game.height/2;
   }
 
   const state = JSON.stringify({ 
